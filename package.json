@@ -1,0 +1,16 @@
+{
+  "name": "draw-and-guess",
+  "version": "1.0.0",
+  "description": "Multiplayer online Draw and Guess game",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": ["game", "draw", "guess", "websocket", "multiplayer"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "ws": "^8.14.2"
+  }
+}
