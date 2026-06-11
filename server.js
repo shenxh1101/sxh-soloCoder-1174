@@ -198,6 +198,10 @@ class GameServer {
     room.roundTimer = setTimeout(() => {
       this.endRound(roomCode, 'timeout');
     }, ROUND_TIME * 1000);
+
+    room.roundStateInterval = setInterval(() => {
+      this.broadcastRoomState(roomCode);
+    }, 2000);
   }
 
   logRound(roomCode) {
@@ -293,12 +297,7 @@ class GameServer {
         lastLog.guessedBy.push({ name: guesser.name, time: timeLeft, points: points });
       }
 
-      if (room.guessed.size === room.players.filter(p => !p.disconnected && p.id !== drawer.id).length) {
-        this.endRound(roomCode, 'all-guessed');
-      } else {
-        this.broadcastRoomState(roomCode);
-      }
-
+      this.endRound(roomCode, 'guessed');
       return { correct: true, points: points };
     }
 
@@ -314,6 +313,16 @@ class GameServer {
       room.roundTimer = null;
     }
 
+    if (room.roundStateInterval) {
+      clearInterval(room.roundStateInterval);
+      room.roundStateInterval = null;
+    }
+
+    const lastLog = room.gameLog[room.gameLog.length - 1];
+    if (lastLog) {
+      lastLog.drawingData = [...room.drawingData];
+    }
+
     room.status = 'round-end';
     room.currentDrawerIndex++;
     this.broadcastRoomState(roomCode);
@@ -326,6 +335,16 @@ class GameServer {
   endGame(roomCode) {
     const room = this.getRoom(roomCode);
     if (!room) return;
+
+    if (room.roundTimer) {
+      clearTimeout(room.roundTimer);
+      room.roundTimer = null;
+    }
+
+    if (room.roundStateInterval) {
+      clearInterval(room.roundStateInterval);
+      room.roundStateInterval = null;
+    }
 
     room.status = 'game-end';
 

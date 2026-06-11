@@ -11,6 +11,8 @@
   let gameState = null;
   let reconnectTimer = null;
   let reconnectAttempts = 0;
+  let countdownTimer = null;
+  let localTimeLeft = 0;
   const MAX_RECONNECT = 5;
 
   const canvas = document.getElementById('canvas');
@@ -225,6 +227,7 @@
 
   function handleGameEnd(message) {
     isDrawer = false;
+    stopCountdown();
     showModal('gameOverModal');
 
     const mvpDisplay = document.getElementById('mvpDisplay');
@@ -269,7 +272,205 @@
     a.download = 'game-log-' + (log.roomCode || 'unknown') + '-' + Date.now() + '.json';
     a.click();
     URL.revokeObjectURL(url);
-    addSystemMessage('对局日志已保存');
+
+    if (gameState && gameState.status === 'game-end') {
+      addSystemMessage('对局日志已下载，正在打开复盘...');
+      openReplay(log);
+    } else {
+      addSystemMessage('对局日志已保存（游戏结束后可复盘）');
+    }
+  }
+
+  function openReplay(log) {
+    stopCountdown();
+    document.getElementById('lobby').classList.remove('active');
+    document.getElementById('gameOverModal').classList.remove('active');
+    document.getElementById('gameRoom').classList.remove('active');
+    showModal('replayModal');
+    loadReplayLog(log);
+    addSystemMessage('正在加载对局复盘...');
+  }
+
+  function loadReplayLog(log) {
+    var canvas = document.getElementById('replayCanvas');
+    var ctx = canvas.getContext('2d');
+    var container = canvas.parentElement;
+    var size = Math.min(container.clientWidth - 8, container.clientHeight - 8, 600);
+    canvas.width = size;
+    canvas.height = size;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    document.getElementById('replayRoomCode').textContent = log.roomCode || '--';
+    document.getElementById('replayCategory').textContent = log.category || '--';
+    document.getElementById('replayRounds').textContent = (log.rounds ? log.rounds.length : 0) + ' / ' + (log.totalRounds || 0);
+
+    var roundSelect = document.getElementById('replayRoundSelect');
+    roundSelect.innerHTML = '';
+
+    if (log.rounds && log.rounds.length > 0) {
+      log.rounds.forEach(function(round, idx) {
+        var option = document.createElement('option');
+        option.value = idx;
+        option.textContent = '第' + round.round + '回合 - ' + round.drawer;
+        roundSelect.appendChild(option);
+      });
+    }
+
+    var roundInfo = document.getElementById('replayRoundInfo');
+    roundInfo.innerHTML = '';
+
+    if (log.players) {
+      var playersHtml = '<h3>玩家</h3>';
+      log.players.forEach(function(p) {
+        playersHtml += '<div class="score-row"><span>' + p.name + '</span><span class="score-value">' + p.finalScore + ' 分</span></div>';
+      });
+      roundInfo.innerHTML += playersHtml;
+    }
+
+    window._replayLog = log;
+    window._replayCanvas = canvas;
+    window._replayCtx = ctx;
+    window._replayTimer = null;
+    window._replayStep = 0;
+    window._replayTotalSteps = 0;
+
+    if (log.rounds && log.rounds.length > 0) {
+      loadReplayRound(0);
+    }
+  }
+
+  function loadReplayRound(idx) {
+    var log = window._replayLog;
+    if (!log || !log.rounds || idx >= log.rounds.length) return;
+
+    var round = log.rounds[idx];
+    var canvas = window._replayCanvas;
+    var ctx = window._replayCtx;
+
+    if (window._replayTimer) {
+      clearInterval(window._replayTimer);
+      window._replayTimer = null;
+    }
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    var info = document.getElementById('replayRoundInfo');
+    var details = '<h3>第' + round.round + '回合</h3>';
+    details += '<p>画家: ' + round.drawer + ' | 谜底: ' + escapeHtml(round.word) + '</p>';
+    if (round.guessedBy && round.guessedBy.length > 0) {
+      details += '<p>猜中者: ' + round.guessedBy.map(function(g) { return g.name + '(' + g.points + '分)'; }).join(', ') + '</p>';
+    } else {
+      details += '<p>无人猜中</p>';
+    }
+    if (log.players) {
+      details += '<h3>玩家</h3>';
+      log.players.forEach(function(p) {
+        details += '<div class="score-row"><span>' + p.name + '</span><span class="score-value">' + p.finalScore + ' 分</span></div>';
+      });
+    }
+    info.innerHTML = details;
+
+    var drawingData = round.drawingData || [];
+    window._replayStep = 0;
+    window._replayTotalSteps = drawingData.length;
+
+    document.getElementById('replayProgress').textContent = '';
+
+    if (drawingData.length === 0) {
+      document.getElementById('replayProgress').textContent = '无绘图数据';
+      return;
+    }
+
+    document.getElementById('replayPlayBtn').disabled = false;
+    document.getElementById('replayStopBtn').disabled = true;
+  }
+
+  function playReplay() {
+    var log = window._replayLog;
+    if (!log) return;
+
+    var idx = parseInt(document.getElementById('replayRoundSelect').value);
+    var round = log.rounds[idx];
+    var drawingData = round.drawingData || [];
+
+    if (drawingData.length === 0) {
+      document.getElementById('replayProgress').textContent = '无绘图数据';
+      return;
+    }
+
+    var canvas = window._replayCanvas;
+    var ctx = window._replayCtx;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    document.getElementById('replayPlayBtn').disabled = true;
+    document.getElementById('replayStopBtn').disabled = false;
+
+    window._replayStep = 0;
+    window._replayTotalSteps = drawingData.length;
+
+    var stepInterval = Math.max(10, Math.floor(60000 / drawingData.length));
+
+    window._replayTimer = setInterval(function() {
+      if (window._replayStep >= drawingData.length) {
+        clearInterval(window._replayTimer);
+        window._replayTimer = null;
+        document.getElementById('replayPlayBtn').disabled = false;
+        document.getElementById('replayStopBtn').disabled = true;
+        document.getElementById('replayProgress').textContent = '回放完成';
+        return;
+      }
+
+      var batchEnd = Math.min(window._replayStep + 3, drawingData.length);
+      for (var i = window._replayStep; i < batchEnd; i++) {
+        var d = drawingData[i];
+        ctx.strokeStyle = d.color;
+        ctx.lineWidth = d.width;
+        ctx.globalCompositeOperation = d.tool === 'eraser' ? 'destination-out' : 'source-over';
+        ctx.beginPath();
+        ctx.moveTo(d.prevX, d.prevY);
+        ctx.lineTo(d.x, d.y);
+        ctx.stroke();
+        ctx.globalCompositeOperation = 'source-over';
+      }
+      window._replayStep = batchEnd;
+
+      var pct = Math.min(100, Math.floor(window._replayStep / window._replayTotalSteps * 100));
+      document.getElementById('replayProgress').textContent = pct + '%';
+    }, stepInterval);
+  }
+
+  function stopReplay() {
+    if (window._replayTimer) {
+      clearInterval(window._replayTimer);
+      window._replayTimer = null;
+    }
+    document.getElementById('replayPlayBtn').disabled = false;
+    document.getElementById('replayStopBtn').disabled = true;
+  }
+
+  function handleFileReplay(event) {
+    var file = event.target.files[0];
+    if (!file) return;
+
+    var reader = new FileReader();
+    reader.onload = function(e) {
+      try {
+        var log = JSON.parse(e.target.result);
+        openReplay(log);
+      } catch (err) {
+        alert('文件格式不正确，请选择有效的对局日志 JSON 文件');
+      }
+    };
+    reader.readAsText(file);
+    event.target.value = '';
   }
 
   function handleError(message) {
@@ -331,28 +532,25 @@
 
     const timer = document.getElementById('timer');
     if (state.timeLeft > 0 && state.status === 'playing') {
-      const mins = Math.floor(state.timeLeft / 60);
-      const secs = state.timeLeft % 60;
-      timer.textContent = mins + ':' + (secs < 10 ? '0' : '') + secs;
-      if (state.timeLeft <= 15) {
-        timer.classList.add('urgent');
-      } else {
-        timer.classList.remove('urgent');
-      }
+      localTimeLeft = state.timeLeft;
+      startCountdown();
     } else if (state.status === 'round-end') {
+      stopCountdown();
       timer.textContent = '结束';
       timer.classList.remove('urgent');
     } else if (state.status === 'game-end') {
+      stopCountdown();
       timer.textContent = '--:--';
       timer.classList.remove('urgent');
     } else {
+      stopCountdown();
       timer.textContent = '--:--';
       timer.classList.remove('urgent');
     }
 
     if (state.status === 'playing' && state.currentDrawerId === playerId) {
       isDrawer = true;
-    } else if (state.status !== 'playing') {
+    } else {
       isDrawer = false;
     }
 
@@ -406,8 +604,10 @@
   }
 
   function showLobby() {
+    stopCountdown();
     document.getElementById('gameRoom').classList.remove('active');
     document.getElementById('gameOverModal').classList.remove('active');
+    document.getElementById('replayModal').classList.remove('active');
     document.getElementById('lobby').classList.add('active');
     roomCode = '';
     isHost = false;
@@ -459,6 +659,37 @@
   function sendMessage(type, data) {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(Object.assign({ type: type }, data)));
+    }
+  }
+
+  function startCountdown() {
+    stopCountdown();
+    countdownTimer = setInterval(function() {
+      localTimeLeft--;
+      updateTimerDisplay();
+      if (localTimeLeft <= 0) {
+        stopCountdown();
+      }
+    }, 1000);
+    updateTimerDisplay();
+  }
+
+  function stopCountdown() {
+    if (countdownTimer) {
+      clearInterval(countdownTimer);
+      countdownTimer = null;
+    }
+  }
+
+  function updateTimerDisplay() {
+    var mins = Math.floor(Math.max(0, localTimeLeft) / 60);
+    var secs = Math.max(0, localTimeLeft) % 60;
+    var display = mins + ':' + (secs < 10 ? '0' : '') + secs;
+    document.getElementById('timer').textContent = display;
+    if (localTimeLeft <= 15 && localTimeLeft > 0) {
+      document.getElementById('timer').classList.add('urgent');
+    } else {
+      document.getElementById('timer').classList.remove('urgent');
     }
   }
 
@@ -666,6 +897,28 @@
 
   document.getElementById('playerName').addEventListener('input', function() {
     localStorage.setItem('drawGuess_playerName', this.value);
+  });
+
+  document.getElementById('replayPlayBtn').addEventListener('click', function() {
+    playReplay();
+  });
+
+  document.getElementById('replayStopBtn').addEventListener('click', function() {
+    stopReplay();
+  });
+
+  document.getElementById('replayRoundSelect').addEventListener('change', function() {
+    stopReplay();
+    loadReplayRound(parseInt(this.value));
+  });
+
+  document.getElementById('replayBackBtn').addEventListener('click', function() {
+    stopReplay();
+    showLobby();
+  });
+
+  document.getElementById('replayFileInput').addEventListener('change', function(event) {
+    handleFileReplay(event);
   });
 
   connect();
