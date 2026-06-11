@@ -331,6 +331,66 @@ button:disabled {
   background: #ffe082;
 }
 
+.round-history {
+  background: var(--panel-light);
+  border-radius: 10px;
+  padding: 14px;
+  flex: 1;
+  overflow-y: auto;
+  min-height: 100px;
+}
+
+.round-history h3 {
+  font-size: 0.9em;
+  margin-bottom: 8px;
+  color: var(--text-muted);
+}
+
+#roundHistoryList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.history-empty {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.85em;
+  padding: 12px 0;
+}
+
+.history-item {
+  background: var(--bg);
+  border-radius: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: 1px solid transparent;
+}
+
+.history-item:hover {
+  border-color: var(--primary);
+  background: rgba(108,92,231,0.1);
+}
+
+.history-item-header {
+  font-weight: 700;
+  color: var(--secondary);
+  font-size: 0.82em;
+  margin-bottom: 3px;
+}
+
+.history-item-word {
+  font-size: 0.8em;
+  color: var(--text);
+  margin-bottom: 2px;
+}
+
+.history-item-guessers {
+  font-size: 0.75em;
+  color: var(--text-muted);
+}
+
 .center-panel {
   flex: 1;
   display: flex;

@@ -385,7 +385,7 @@ class GameServer {
   clearCanvas(roomCode, excludeId) {
     const room = this.getRoom(roomCode);
     if (room) {
-      room.drawingData = [];
+      room.drawingData.push({ type: 'clear' });
       this.broadcastToRoom(roomCode, {
         type: 'clear-canvas'
       }, excludeId);
@@ -454,7 +454,14 @@ class GameServer {
       hints: room.hints,
       revealedWord: this.getRevealedWord(room),
       timeLeft: this.getTimeLeft(roomCode),
-      drawingData: room.drawingData
+      drawingData: room.drawingData,
+      gameLog: room.gameLog.map(log => ({
+        round: log.round,
+        drawer: log.drawer,
+        word: log.word,
+        guessedBy: log.guessedBy,
+        drawingData: log.drawingData
+      }))
     };
   }
 
@@ -482,6 +489,8 @@ class GameServer {
     if (!room) return null;
 
     const log = {
+      version: '1.0',
+      game: 'draw-and-guess',
       roomCode: room.code,
       category: room.category,
       totalRounds: room.totalRounds,

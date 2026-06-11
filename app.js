@@ -283,15 +283,37 @@
 
   function openReplay(log) {
     stopCountdown();
-    document.getElementById('lobby').classList.remove('active');
     document.getElementById('gameOverModal').classList.remove('active');
-    document.getElementById('gameRoom').classList.remove('active');
     showModal('replayModal');
     loadReplayLog(log);
-    addSystemMessage('正在加载对局复盘...');
+  }
+
+  function openReplayFromFile(log) {
+    showModal('replayModal');
+    loadReplayLog(log);
+  }
+
+  function validateReplayLog(log) {
+    if (!log || typeof log !== 'object') return false;
+    if (log.game !== 'draw-and-guess') return false;
+    if (!Array.isArray(log.rounds)) return false;
+    if (!Array.isArray(log.players)) return false;
+    if (typeof log.roomCode !== 'string' || log.roomCode.length === 0) return false;
+    for (var i = 0; i < log.rounds.length; i++) {
+      var r = log.rounds[i];
+      if (typeof r.round !== 'number' || typeof r.word !== 'string' || typeof r.drawer !== 'string') return false;
+      if (!Array.isArray(r.guessedBy)) return false;
+    }
+    return true;
   }
 
   function loadReplayLog(log) {
+    if (!validateReplayLog(log)) {
+      alert('文件格式不正确，请选择有效的"你画我猜"对局日志 JSON 文件');
+      document.getElementById('replayModal').classList.remove('active');
+      return;
+    }
+
     var canvas = document.getElementById('replayCanvas');
     var ctx = canvas.getContext('2d');
     var container = canvas.parentElement;
@@ -317,17 +339,6 @@
         option.textContent = '第' + round.round + '回合 - ' + round.drawer;
         roundSelect.appendChild(option);
       });
-    }
-
-    var roundInfo = document.getElementById('replayRoundInfo');
-    roundInfo.innerHTML = '';
-
-    if (log.players) {
-      var playersHtml = '<h3>玩家</h3>';
-      log.players.forEach(function(p) {
-        playersHtml += '<div class="score-row"><span>' + p.name + '</span><span class="score-value">' + p.finalScore + ' 分</span></div>';
-      });
-      roundInfo.innerHTML += playersHtml;
     }
 
     window._replayLog = log;
@@ -361,7 +372,7 @@
 
     var info = document.getElementById('replayRoundInfo');
     var details = '<h3>第' + round.round + '回合</h3>';
-    details += '<p>画家: ' + round.drawer + ' | 谜底: ' + escapeHtml(round.word) + '</p>';
+    details += '<p>画家: ' + escapeHtml(round.drawer) + ' | 谜底: ' + escapeHtml(round.word) + '</p>';
     if (round.guessedBy && round.guessedBy.length > 0) {
       details += '<p>猜中者: ' + round.guessedBy.map(function(g) { return g.name + '(' + g.points + '分)'; }).join(', ') + '</p>';
     } else {
@@ -370,7 +381,7 @@
     if (log.players) {
       details += '<h3>玩家</h3>';
       log.players.forEach(function(p) {
-        details += '<div class="score-row"><span>' + p.name + '</span><span class="score-value">' + p.finalScore + ' 分</span></div>';
+        details += '<div class="score-row"><span>' + escapeHtml(p.name) + '</span><span class="score-value">' + p.finalScore + ' 分</span></div>';
       });
     }
     info.innerHTML = details;
@@ -381,13 +392,12 @@
 
     document.getElementById('replayProgress').textContent = '';
 
+    document.getElementById('replayPlayBtn').disabled = drawingData.length === 0;
+    document.getElementById('replayStopBtn').disabled = true;
+
     if (drawingData.length === 0) {
       document.getElementById('replayProgress').textContent = '无绘图数据';
-      return;
     }
-
-    document.getElementById('replayPlayBtn').disabled = false;
-    document.getElementById('replayStopBtn').disabled = true;
   }
 
   function playReplay() {
@@ -416,7 +426,7 @@
     window._replayStep = 0;
     window._replayTotalSteps = drawingData.length;
 
-    var stepInterval = Math.max(10, Math.floor(60000 / drawingData.length));
+    var stepInterval = Math.max(15, Math.floor(80000 / drawingData.length));
 
     window._replayTimer = setInterval(function() {
       if (window._replayStep >= drawingData.length) {
@@ -428,9 +438,15 @@
         return;
       }
 
-      var batchEnd = Math.min(window._replayStep + 3, drawingData.length);
+      var batchEnd = Math.min(window._replayStep + 2, drawingData.length);
       for (var i = window._replayStep; i < batchEnd; i++) {
         var d = drawingData[i];
+        if (d.type === 'clear') {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          continue;
+        }
         ctx.strokeStyle = d.color;
         ctx.lineWidth = d.width;
         ctx.globalCompositeOperation = d.tool === 'eraser' ? 'destination-out' : 'source-over';
@@ -464,13 +480,73 @@
     reader.onload = function(e) {
       try {
         var log = JSON.parse(e.target.result);
-        openReplay(log);
+        if (!validateReplayLog(log)) {
+          alert('文件格式不正确，请选择有效的"你画我猜"对局日志 JSON 文件');
+          return;
+        }
+        openReplayFromFile(log);
       } catch (err) {
-        alert('文件格式不正确，请选择有效的对局日志 JSON 文件');
+        alert('文件格式不正确，无法解析 JSON');
       }
     };
     reader.readAsText(file);
     event.target.value = '';
+  }
+
+  function renderRoundHistory(gameLog) {
+    var container = document.getElementById('roundHistoryList');
+    if (!container) return;
+    container.innerHTML = '';
+
+    if (!gameLog || gameLog.length === 0) {
+      container.innerHTML = '<div class="history-empty">暂无已结束回合</div>';
+      return;
+    }
+
+    gameLog.forEach(function(round, idx) {
+      var div = document.createElement('div');
+      div.className = 'history-item';
+      div.setAttribute('data-round', idx);
+
+      var header = document.createElement('div');
+      header.className = 'history-item-header';
+      header.textContent = '第' + round.round + '回合 - 画家: ' + round.drawer;
+      div.appendChild(header);
+
+      var word = document.createElement('div');
+      word.className = 'history-item-word';
+      word.textContent = '谜底: ' + round.word;
+      div.appendChild(word);
+
+      if (round.guessedBy && round.guessedBy.length > 0) {
+        var guessers = document.createElement('div');
+        guessers.className = 'history-item-guessers';
+        guessers.textContent = '猜中: ' + round.guessedBy.map(function(g) { return g.name + '(' + g.points + '分)'; }).join(', ');
+        div.appendChild(guessers);
+      } else {
+        var noGuess = document.createElement('div');
+        noGuess.className = 'history-item-guessers';
+        noGuess.textContent = '无人猜中';
+        div.appendChild(noGuess);
+      }
+
+      div.addEventListener('click', function() {
+        var log = window._replayLog || {
+          game: 'draw-and-guess',
+          version: '1.0',
+          roomCode: roomCode,
+          category: gameState ? gameState.category : '',
+          totalRounds: gameState ? gameState.totalRounds : 0,
+          players: gameState ? gameState.players.map(function(p) { return { id: p.id, name: p.name, finalScore: p.score }; }) : [],
+          rounds: gameLog
+        };
+        openReplayFromFile(log);
+        document.getElementById('replayRoundSelect').value = idx;
+        loadReplayRound(idx);
+      });
+
+      container.appendChild(div);
+    });
   }
 
   function handleError(message) {
@@ -557,16 +633,25 @@
     if (state.status === 'playing' && isDrawer) {
       document.getElementById('toolbar').classList.remove('disabled');
       canvas.classList.remove('disabled');
+      document.getElementById('hintBtn').disabled = false;
       document.getElementById('chatInput').disabled = true;
       document.getElementById('sendBtn').disabled = true;
     } else if (state.status === 'playing' && !isDrawer) {
       document.getElementById('toolbar').classList.add('disabled');
       canvas.classList.add('disabled');
+      document.getElementById('hintBtn').disabled = true;
       document.getElementById('chatInput').disabled = false;
       document.getElementById('sendBtn').disabled = false;
     } else if (state.status === 'round-end' || state.status === 'game-end') {
       document.getElementById('toolbar').classList.add('disabled');
       canvas.classList.add('disabled');
+      document.getElementById('hintBtn').disabled = true;
+      document.getElementById('chatInput').disabled = true;
+      document.getElementById('sendBtn').disabled = true;
+    } else {
+      document.getElementById('toolbar').classList.add('disabled');
+      canvas.classList.add('disabled');
+      document.getElementById('hintBtn').disabled = true;
       document.getElementById('chatInput').disabled = true;
       document.getElementById('sendBtn').disabled = true;
     }
@@ -578,12 +663,26 @@
     if (state.drawingData && state.drawingData.length > 0 && !isDrawer) {
       replayDrawingData(state.drawingData);
     }
+
+    if (state.gameLog) {
+      var completedRounds = state.gameLog.filter(function(log) {
+        return log.round < state.currentRound;
+      });
+      renderRoundHistory(completedRounds);
+    }
   }
 
   function replayDrawingData(data) {
     if (!canvasInit) return;
     handleClearCanvas();
+    if (!data || data.length === 0) return;
     data.forEach(function(d) {
+      if (d.type === 'clear') {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        return;
+      }
       ctx.strokeStyle = d.color;
       ctx.lineWidth = d.width;
       ctx.globalCompositeOperation = d.tool === 'eraser' ? 'destination-out' : 'source-over';
@@ -914,7 +1013,7 @@
 
   document.getElementById('replayBackBtn').addEventListener('click', function() {
     stopReplay();
-    showLobby();
+    document.getElementById('replayModal').classList.remove('active');
   });
 
   document.getElementById('replayFileInput').addEventListener('change', function(event) {
