@@ -391,6 +391,14 @@ button:disabled {
   color: var(--text-muted);
 }
 
+.history-item-changes {
+  font-size: 0.78em;
+  color: var(--warning);
+  margin-top: 2px;
+  line-height: 1.4;
+  white-space: pre-line;
+}
+
 .center-panel {
   flex: 1;
   display: flex;

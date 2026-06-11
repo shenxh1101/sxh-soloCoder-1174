@@ -373,13 +373,18 @@
     var info = document.getElementById('replayRoundInfo');
     var details = '<h3>第' + round.round + '回合</h3>';
     details += '<p>画家: ' + escapeHtml(round.drawer) + ' | 谜底: ' + escapeHtml(round.word) + '</p>';
+    details += '<h3>分数变化</h3>';
     if (round.guessedBy && round.guessedBy.length > 0) {
-      details += '<p>猜中者: ' + round.guessedBy.map(function(g) { return g.name + '(' + g.points + '分)'; }).join(', ') + '</p>';
+      round.guessedBy.forEach(function(g) {
+        details += '<div class="score-row"><span>' + escapeHtml(g.name) + ' 猜中</span><span class="score-value">+' + g.points + ' 分</span></div>';
+      });
+      var drawerPoints = Math.max(2, Math.floor(round.guessedBy[0].points / 2));
+      details += '<div class="score-row"><span>' + escapeHtml(round.drawer) + ' 助攻</span><span class="score-value">+' + drawerPoints + ' 分</span></div>';
     } else {
-      details += '<p>无人猜中</p>';
+      details += '<div class="score-row"><span>无人猜中</span><span class="score-value">+0</span></div>';
     }
     if (log.players) {
-      details += '<h3>玩家</h3>';
+      details += '<h3>当前总分</h3>';
       log.players.forEach(function(p) {
         details += '<div class="score-row"><span>' + escapeHtml(p.name) + '</span><span class="score-value">' + p.finalScore + ' 分</span></div>';
       });
@@ -503,6 +508,13 @@
       return;
     }
 
+    var baseScores = {};
+    if (gameState && gameState.players) {
+      gameState.players.forEach(function(p) {
+        baseScores[p.name] = p.score;
+      });
+    }
+
     gameLog.forEach(function(round, idx) {
       var div = document.createElement('div');
       div.className = 'history-item';
@@ -518,6 +530,26 @@
       word.textContent = '谜底: ' + round.word;
       div.appendChild(word);
 
+      var changes = document.createElement('div');
+      changes.className = 'history-item-changes';
+      var changeText = [];
+
+      if (round.guessedBy && round.guessedBy.length > 0) {
+        round.guessedBy.forEach(function(g) {
+          changeText.push(g.name + ' +' + g.points + '分');
+          if (changeText.length % 2 === 0) {
+            changeText.push('\n');
+          }
+        });
+        var drawerPoints = round.guessedBy[0].points / 2;
+        changeText.push(round.drawer + ' +' + Math.max(2, Math.floor(drawerPoints)) + '分（助攻）');
+      } else {
+        changeText.push('无人猜中，无人加分');
+      }
+
+      changes.textContent = changeText.join(' · ');
+      div.appendChild(changes);
+
       if (round.guessedBy && round.guessedBy.length > 0) {
         var guessers = document.createElement('div');
         guessers.className = 'history-item-guessers';
@@ -531,7 +563,7 @@
       }
 
       div.addEventListener('click', function() {
-        var log = window._replayLog || {
+        var currentRoomLog = {
           game: 'draw-and-guess',
           version: '1.0',
           roomCode: roomCode,
@@ -540,7 +572,7 @@
           players: gameState ? gameState.players.map(function(p) { return { id: p.id, name: p.name, finalScore: p.score }; }) : [],
           rounds: gameLog
         };
-        openReplayFromFile(log);
+        openReplayFromFile(currentRoomLog);
         document.getElementById('replayRoundSelect').value = idx;
         loadReplayRound(idx);
       });
@@ -630,10 +662,16 @@
       isDrawer = false;
     }
 
-    if (state.status === 'playing' && isDrawer) {
+    if (state.status === 'playing' && isDrawer && currentWord) {
       document.getElementById('toolbar').classList.remove('disabled');
       canvas.classList.remove('disabled');
       document.getElementById('hintBtn').disabled = false;
+      document.getElementById('chatInput').disabled = true;
+      document.getElementById('sendBtn').disabled = true;
+    } else if (state.status === 'playing' && isDrawer && !currentWord) {
+      document.getElementById('toolbar').classList.add('disabled');
+      canvas.classList.add('disabled');
+      document.getElementById('hintBtn').disabled = true;
       document.getElementById('chatInput').disabled = true;
       document.getElementById('sendBtn').disabled = true;
     } else if (state.status === 'playing' && !isDrawer) {
@@ -657,6 +695,7 @@
     }
 
     if (state.status === 'round-end') {
+      currentWord = '';
       addSystemMessage('回合结束！谜底是：' + (state.revealedWord || '未知'));
     }
 
@@ -666,7 +705,7 @@
 
     if (state.gameLog) {
       var completedRounds = state.gameLog.filter(function(log) {
-        return log.round < state.currentRound;
+        return log.drawingData !== undefined;
       });
       renderRoundHistory(completedRounds);
     }
